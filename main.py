@@ -151,11 +151,7 @@ class Email:
         )
         try:
             Email(
-                para=[
-                    'pedrorodrigues@grupomonaco.com.br',
-                    'silviomota@grupomonaco.com.br',
-                    'lorramferreira@grupomonaco.com.br',
-                ],
+                para=os.getenv("EMAIL_RECIPIENTS_ERROR").split(';'),
                 titulo="🚨 ERRO CRÍTICO: Automação AD",
                 corpo_texto=corpo,
             ).enviar()
@@ -300,7 +296,7 @@ def main() -> None:
             if entry.sAMAccountName.value in inactive_logins
         ]
 
-        manager.remove_users([])
+        manager.remove_users(to_remove)
 
         log.info("Automação AD concluída com sucesso.")
 
