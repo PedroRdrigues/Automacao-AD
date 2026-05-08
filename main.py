@@ -287,13 +287,10 @@ def main() -> None:
         manager = ManagerAD()
         ad_inactive = manager.get_inactive_users()
 
-        inactive_logins = {list(u.keys())[0] for u in
-                           [{u[0]: u[1]} for u in list_inactive]}
-
         # Usuários do AD estão na lista de inativos do Metadados
         to_remove = [
             entry for entry in ad_inactive
-            if entry.sAMAccountName.value in inactive_logins
+            if entry.sAMAccountName.value in [u[0] for u in list_inactive]
         ]
 
         manager.remove_users(to_remove)
