@@ -65,7 +65,7 @@ class Log:
         self._logger.addHandler(console_handler)
         self._logger.addHandler(self._session_handler)
 
-        self._logger.info("--- [ inicializado ] ---")
+        self._logger.info("\n--- [ inicializado ] ---")
 
     def check_and_update_log_file(self) -> None:
         log_dir = Path.cwd() / "logs"
