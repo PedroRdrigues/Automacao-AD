@@ -309,7 +309,6 @@ def main() -> None:
             u for u in users_inact
             if u[0] not in active_set and u[1] <= limite
         ]
-        log.info(f"{len(list_inactive)} usuário(s) inativo(s) elegíveis para remoção.")
 
         manager     = ManagerAD()
         ad_inactive = manager.get_inactive_users()
@@ -319,9 +318,8 @@ def main() -> None:
             entry for entry in ad_inactive
             if entry.sAMAccountName.value in inactive_logins
         ]
-        log.info(f"{len(to_remove)} usuário(s) serão removidos do grupo AD.")
 
-        manager.remove_users(to_remove)
+        manager.remove_users([])
         log.info("Automação AD concluída com sucesso.")
 
     except Exception as e:
