@@ -304,13 +304,13 @@ class ManagerAD:
                     sam = u.sAMAccountName.value
                     log.info(f"Removendo: {sam}")
 
-                    # # Edita o atributo member para remover o usuário específico
-                    # conn.modify(self.GRUPO_DN, {'member': [(MODIFY_DELETE, [user_dn])]})
-                    #
-                    # if conn.result['description'] == 'success':
-                    #     log.info(f"Usuário {sam} removido com sucesso do grupo de e-mail no AD.")
-                    # else:
-                    #     raise Exception(f"Falha de privilégios AD ao remover {sam}: {conn.result['description']}")
+                    # Edita o atributo member para remover o usuário específico
+                    conn.modify(self.GRUPO_DN, {'member': [(MODIFY_DELETE, [user_dn])]})
+
+                    if conn.result['description'] == 'success':
+                        log.info(f"Usuário {sam} removido com sucesso do grupo de e-mail no AD.")
+                    else:
+                        raise Exception(f"Falha de privilégios AD ao remover {sam}: {conn.result['description']}")
 
                 # Salva a lista de removidos para a próxima etapa agir na Web
                 self.db.insert_db_memory([u.sAMAccountName.value for u in usuarios])
