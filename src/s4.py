@@ -1,46 +1,39 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Oct  4 17:13:35 2024
-
-@author: PedroRdrigues
-Refactored for performance, stability, and clean code principles.
+Automação Web - Portal S4
+Módulo responsável pela interação via Selenium para exclusão de caixas de e-mail.
 """
 
 import os
 from time import sleep, time
-from typing import List, Tuple, Optional
+from typing import Tuple, Optional
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 
-from dotenv import load_dotenv
-from utils import DBConnection
+from utils import DBConnection, Log
 
-# Carrega as variáveis de ambiente
-load_dotenv(verbose=True)
+# Instância global de Log para manter rastro das ações
+log = Log().get_logger()
 
 
 class FrameManager:
-    """Classe responsável por gerenciar a navegação e interações dentro de iframes do Selenium."""
+    """Gerencia a navegação e interações de forma inteligente dentro de iframes do Selenium."""
 
     def __init__(self, driver: webdriver.Chrome):
         self.driver = driver
-        self.default_timeout = 10  # Tempo limite padrão mais realista (10 segundos)
+        self.default_timeout = 10  # Tempo limite padrão de 10 segundos
 
     def _localizar_frame_do_elemento(self, locator_type: By, locator_value: str) -> Tuple[
         bool, Optional[webdriver.remote.webelement.WebElement]]:
-        """
-        Varre todos os frames da página atual em busca de um elemento específico.
-        Retorna (True, frame_elemento) se encontrado, ou (False, None).
-        """
+        """Varre os frames da página atual em busca de um elemento e foca no frame correto."""
         self.driver.switch_to.default_content()
 
-        # Obtém todos os frames e iframes da raiz
         iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
         frames = self.driver.find_elements(By.TAG_NAME, "frame")
         todos_frames = iframes + frames
@@ -48,7 +41,6 @@ class FrameManager:
         for frame in todos_frames:
             try:
                 self.driver.switch_to.frame(frame)
-                # Procura imediata sem espera explícita para evitar lentidão na varredura
                 elementos = self.driver.find_elements(locator_type, locator_value)
                 if elementos:
                     return True, frame
@@ -70,27 +62,27 @@ class FrameManager:
                 elem = WebDriverWait(self.driver, self.default_timeout).until(
                     EC.element_to_be_clickable((locator_type, locator_value))
                 )
+                sleep(2)
                 if usar_js:
                     self.driver.execute_script("arguments[0].click();", elem)
                 else:
                     elem.click()
-                print(f"✅ Clique realizado em '{locator_value}' no frame.")
+                    sleep(2)
+
                 return True
             except TimeoutException:
-                print(f"❌ Elemento '{locator_value}' encontrado no frame, mas não ficou clicável.")
-                if not manter_frame:
-                    self.driver.switch_to.default_content()
+                log.warning(f"❌ Elemento '{locator_value}' encontrado no frame, mas não está clicável.")
                 return False
             finally:
                 if not manter_frame:
                     self.driver.switch_to.default_content()
         else:
-            print(f"❌ Elemento '{locator_value}' não foi encontrado em nenhum frame.")
+            log.warning(f"❌ Elemento '{locator_value}' não encontrado em nenhum frame.")
             return False
 
     def write_on_element(self, locator_type: By, locator_value: str, texto: str, limpar_antes: bool = True,
                          manter_frame: bool = True) -> bool:
-        """Localiza o frame contendo o input, foca nele, insere o texto e pressiona ENTER."""
+        """Localiza o frame do input, foca nele, insere o texto e pressiona ENTER."""
         encontrou, frame = self._localizar_frame_do_elemento(locator_type, locator_value)
 
         if encontrou:
@@ -99,28 +91,27 @@ class FrameManager:
                 input_elem = WebDriverWait(self.driver, self.default_timeout).until(
                     EC.visibility_of_element_located((locator_type, locator_value))
                 )
+                sleep(2)
                 if limpar_antes:
                     input_elem.clear()
 
                 input_elem.send_keys(texto)
-                sleep(0.5)  # Pequeno delay para garantir o preenchimento seguro antes do enter
+                sleep(0.2)
                 input_elem.send_keys(Keys.ENTER)
+
                 return True
             except TimeoutException:
-                print(
-                    f"❌ Campo de entrada '{locator_value}' encontrado no frame, mas não está disponível para escrita.")
-                if not manter_frame:
-                    self.driver.switch_to.default_content()
+                log.warning(f"❌ Campo de entrada '{locator_value}' indisponível para escrita.")
                 return False
             finally:
                 if not manter_frame:
                     self.driver.switch_to.default_content()
         else:
-            print(f"❌ Campo de entrada '{locator_value}' não encontrado em nenhum frame.")
+            log.warning(f"❌ Campo de entrada '{locator_value}' não encontrado.")
             return False
 
     def get_text_on_element(self, locator_type: By, locator_value: str, manter_no_frame: bool = True) -> str:
-        """Localiza o frame contendo o elemento e retorna seu conteúdo de texto ou atributo principal."""
+        """Localiza o elemento e retorna seu conteúdo de texto ou valor."""
         encontrou, frame = self._localizar_frame_do_elemento(locator_type, locator_value)
 
         if encontrou:
@@ -131,55 +122,49 @@ class FrameManager:
                 )
                 texto = elem.text
 
-                # Fallback caso o texto interno venha vazio
                 if not texto:
                     texto = elem.get_attribute("value") or elem.get_attribute("title") or ""
 
                 return texto.strip()
             except TimeoutException:
-                print(f"❌ Elemento '{locator_value}' encontrado no frame, mas expirou o tempo de leitura.")
+                log.warning(f"❌ Tempo limite excedido para leitura no elemento '{locator_value}'.")
                 return ""
             finally:
                 if not manter_no_frame:
                     self.driver.switch_to.default_content()
         return ""
 
-    def wait_loading_disappear(self, xpath_loading: str = "/html/body/div[8]/div[2]", tempo_limite: int = 30) -> bool:
-        """Aguarda de forma otimizada até que a janela/overlay de carregamento desapareça da tela."""
+    def wait_loading_disappear(self, xpath_loading: str = "/html/body/div[8]/div[2]", tempo_limite: int = 1800) -> bool:
+        """Aguarda a tela/overlay de carregamento desaparecer."""
         self.driver.switch_to.default_content()
-        print("⏳ Aguardando a tela de loading sumir...")
+        log.info("⏳ Aguardando processamento da requisição no servidor S4...")
         inicio = time()
 
-        # Aguarda brevemente para ver se o loading de fato aparece na tela
         try:
-            WebDriverWait(self.driver, 2).until(
+            WebDriverWait(self.driver, 5).until(
                 EC.visibility_of_element_located((By.XPATH, xpath_loading))
             )
-            print("🔄 Loading detectado. Aguardando conclusão da tarefa no servidor...")
         except TimeoutException:
-            # Caso o processo seja tão rápido que o loading nem apareça
             pass
 
-        # Aguarda o sumiço definitivo do elemento
         try:
             WebDriverWait(self.driver, tempo_limite).until(
                 EC.invisibility_of_element_located((By.XPATH, xpath_loading))
             )
-            duracao = round(time() - inicio, 2)
-            print(f"✨ Concluído! O loading sumiu após {duracao}s. Prosseguindo...")
-            sleep(1.5)  # Breve pausa de estabilização do DOM pós-loading
+            duracao = round(time() - inicio, 5)
+            log.info(f"✨ Loading concluído após {duracao}s. Prosseguindo...")
+            sleep(10)
             return True
         except TimeoutException:
-            print(f"⚠️ Alerta: O loading persistiu por mais de {tempo_limite} segundos. O sistema pode estar instável.")
+            log.error(f"⚠️ O loading da página travou e não sumiu após {tempo_limite} segundos.")
             return False
 
     def voltar_para_raiz(self):
-        """Volta o foco do Selenium para fora de qualquer frame."""
         self.driver.switch_to.default_content()
 
 
 class S4EmailAutomation:
-    """Classe controladora responsável por gerenciar as regras de negócio do fluxo de limpeza do S4."""
+    """Classe controladora do fluxo de negócio web no S4."""
 
     def __init__(self):
         self.db = DBConnection()
@@ -187,7 +172,6 @@ class S4EmailAutomation:
         self.fm = FrameManager(self.driver)
 
     def _inicializar_driver(self) -> webdriver.Chrome:
-        """Configura e inicializa o WebDriver do Chrome."""
         options = Options()
         options.accept_insecure_certs = True
         options.add_argument('--ignore-certificate-errors')
@@ -195,134 +179,95 @@ class S4EmailAutomation:
         return webdriver.Chrome(options=options)
 
     def realizar_login(self) -> bool:
-        """Realiza o processo de login na intranet S4."""
         url = os.getenv('S4_URL')
         if not url:
-            raise ValueError("A variável de ambiente 'S4_URL' não está configurada.")
+            raise ValueError("A variável 'S4_URL' não está configurada no .env")
 
-        print(f"Conectando ao sistema S4 em: {url}")
+        log.info(f"Conectando ao sistema S4")
         self.driver.get(url)
         sleep(1)
 
-        # Preenche as credenciais de acesso
-        print('⌨️ Inserindo username...')
+        log.info('Inserindo credenciais de acesso...')
         elem_user = WebDriverWait(self.driver, 10).until(
             EC.presence_of_element_located((By.NAME, 'logins4'))
         )
         elem_user.send_keys(os.getenv('S4_USER', '') + Keys.TAB)
+        sleep(1)
 
-        print('⌨️ Inserindo password...')
         elem_pass = WebDriverWait(self.driver, 10).until(
             EC.presence_of_element_located((By.NAME, 'senhas4'))
         )
         elem_pass.send_keys(os.getenv('S4_PASS', '') + Keys.ENTER)
-
-        # Validação/Fechamento de Modal de Atualização se houver
+        sleep(1)
         self._tratar_modal_inicial()
+        sleep(1)
         return True
 
     def _tratar_modal_inicial(self):
-        """Identifica se a caixa de diálogo/atualização apareceu e a fecha se necessário."""
         try:
             modal = WebDriverWait(self.driver, 5).until(
                 EC.visibility_of_element_located((By.CLASS_NAME, "modal-footer"))
             )
-            print("📢 Caixa de atualização detectada! Fechando modal...")
-            botao_fechar = modal.find_element(By.TAG_NAME, "button")
-            botao_fechar.click()
+            log.info("Caixa de atualização de sistema detectada. Fechando modal...")
+            sleep(1)
+            modal.find_element(By.TAG_NAME, "button").click()
             sleep(1)
         except TimeoutException:
-            print("ℹ️ Nenhuma caixa de atualização pendente identificada. Seguindo...")
+            pass
 
     def acessar_menu_usuarios(self):
-        """Navega pelo menu principal até a tela de gerenciamento de e-mails."""
-        print("📂 Acessando menu principal...")
-        btn_menu = WebDriverWait(self.driver, 10).until(
+        log.info("Acessando o menu principal de usuários de e-mail...")
+        btn_menu = WebDriverWait(self.driver, 30).until(
             EC.element_to_be_clickable(
                 (By.XPATH, '/html/body/table/tbody/tr/td/table/tbody/tr[1]/td/table/tbody/tr[1]/td[1]/a/img'))
         )
         btn_menu.click()
-
-        # Clique no submenu de usuários usando o gerenciador de frames
         self.fm.click_on_element(By.ID, "email_usuarios", manter_frame=False)
 
     def processar_exclusoes(self):
-        """Busca os usuários inativos do banco de dados na memória e realiza as exclusões necessárias."""
         usuarios_inativos = self.db.select_db_memory()
-        print(f"📋 Total de {len(usuarios_inativos)} usuários inativos para processar.")
+        log.info(f"Total de {len(usuarios_inativos)} usuários pendentes de exclusão na fila de memória.")
 
         for usuario in usuarios_inativos:
-            print(f"\n🔍 Iniciando verificação para o usuário: {usuario}")
+            log.info(f"Iniciando busca no painel web para a conta: '{usuario}'")
+            usuario_completo = f'{usuario}@grupomonaco.com.br'
+            self.fm.write_on_element(By.ID, "gs_mail", usuario_completo)
+            sleep(2)
 
-            # Escreve o usuário na barra de pesquisa (ID: gs_mail)
-            self.fm.write_on_element(By.ID, "gs_mail", usuario)
-            sleep(1.5)  # Pausa necessária para atualização da listagem dinâmica pós-busca
-
-            # Obtém o usuário retornado na tabela para certificar-se de que é a conta correta
+            # Validação Dupla de Identidade
+            # seletor_xpath = f"//td[@title='{usuario_completo}'"
             user_s4_completo = self.fm.get_text_on_element(
-                By.XPATH,
-                '/html/body/div[6]/div[3]/div[4]/div/table/tbody/tr[2]/td[3]'
+                By.XPATH, '/html/body/div[6]/div[3]/div[4]/div/table/tbody/tr[2]/td[3]'
             )
-
             if not user_s4_completo:
-                print(f"⚠️ Usuário '{usuario}' não encontrado na tabela de listagem.")
+                log.warning(f"Usuário '{usuario_completo}' não listado na tabela (já excluído ou não existe). Pulando.")
                 continue
 
-            user_s4 = user_s4_completo.split('@')[0].strip()
-
-            if user_s4 != usuario:
-                print(
-                    f"⚠️ Divergência de dados detectada (Encontrado: '{user_s4}' | Esperado: '{usuario}'). Abortando deleção deste registro.")
+            if user_s4_completo != usuario_completo:
+                log.error(
+                    f"Divergência de Identidade! Retornado: '{user_s4_completo}' | Esperado: '{usuario_completo}'. Exclusão ABORTADA para este registro.")
                 continue
 
-            print(f"🎯 Registro confirmado e validado! Removendo: {user_s4}")
+            log.info(f"Identidade validada com sucesso. Removendo permanentemente a conta: {user_s4_completo}")
 
-            # Clica no botão de Excluir da linha correspondente (td[29]/img)
+            # Botão da Lixeira
             self.fm.click_on_element(By.XPATH, '/html/body/div[6]/div[3]/div[4]/div/table/tbody/tr[2]/td[29]/img')
-            sleep(1)
-
-            # Clica no botão de confirmação da janela de exclusão
+            sleep(2)
+            # Confirmar Pop-up de exclusão
             self.fm.click_on_element(By.XPATH, '/html/body/div[8]/div[3]/div/button[1]')
 
-            # Aguarda a finalização do processo no servidor
+            # Aguarda a tela de carregamento para garantir sincronia
             self.fm.wait_loading_disappear()
 
+    def fechar_s4(self):
+        log.info("Fechando s4...")
+        self.fm.voltar_para_raiz()
+        sleep(2)
+        element = self.driver.find_element(By.XPATH, '/html/body/table/tbody/tr/td/table/tbody/tr[1]/td/table/tbody/tr[1]/td[16]/a/img')
+        element.click()
+        sleep(5)
+
     def fechar_driver(self):
-        """Garante o encerramento correto do processo do navegador."""
         if self.driver:
             self.driver.quit()
-            print("🔌 Navegador fechado e sessões limpas.")
-
-
-def executar_fluxo_completo():
-    """Inicializa e executa o fluxo completo de automação com tratamento de segurança."""
-    automacao = S4EmailAutomation()
-    try:
-        automacao.realizar_login()
-        automacao.acessar_menu_usuarios()
-        automacao.processar_exclusoes()
-    except Exception as e:
-        print(f"💥 Ocorreu uma falha grave durante a execução: {e}")
-    finally:
-        automacao.fechar_driver()
-
-
-if __name__ == "__main__":
-    # Inicialização e sementeira de dados de teste (SQLite em memória compartilhado via Singleton)
-    db = DBConnection()
-    db.insert_db_memory([
-        'teste_automacao3',
-        'teste_automacao1',
-        'teste_automacao2',
-        'teste_automacao4',
-        'teste_automacao5'
-    ])
-
-    print("📊 Lista de usuários na fila de exclusão:")
-    print(db.select_db_memory())
-
-    # Inicia a automação web
-    executar_fluxo_completo()
-
-    # Fecha o banco de dados principal
-    db.close_memory_db()
+            log.info("Navegador fechado e sessões de memória de vídeo limpas.")
